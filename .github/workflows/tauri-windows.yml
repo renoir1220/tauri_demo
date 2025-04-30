@@ -1,0 +1,39 @@
+name: Build Tauri Windows App
+
+on:
+  push:
+    tags:
+      - 'v*'   # 每次推送 tag（如 v1.0.0）时触发构建
+
+jobs:
+  build-tauri-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build Tauri App
+        run: npm run tauri build
+
+      - name: Upload Windows bundle as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: tauri-windows
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
