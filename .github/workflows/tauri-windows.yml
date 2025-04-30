@@ -43,4 +43,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tauri-portable
-          path: src-tauri/target/release/LogeneAiDataHelper.exe
+          path: src-tauri/target/release/tauri_demo.exe
