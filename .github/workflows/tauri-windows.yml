@@ -44,3 +44,13 @@ jobs:
         with:
           name: tauri-portable
           path: src-tauri/target/release/tauri_demo.exe
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: |
+            src-tauri/target/release/tauri_demo.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
