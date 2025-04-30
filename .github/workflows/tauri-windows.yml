@@ -49,7 +49,7 @@ jobs:
           args: --bundler none
 
       - name: Upload green portable exe
-        uses: actions/upload-artifact@v3.1.3
+        uses: actions/upload-artifact@v3
         with:
           name: tauri-portable
           path: src-tauri/target/release/*.exe
