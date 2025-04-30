@@ -3,7 +3,10 @@
 import { ref, computed } from 'vue';
 // 1. 导入子组件和类型
 import AddQuery from './components/AddQuery.vue';
-import type { QuerySetData } from './types'; // 假设类型定义在 src/types.ts
+import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
+
+import type { QuerySetData, TableRowData } from './types'; // 假设类型定义在 src/types.ts
 
 // --- Reactive State ---
 
@@ -22,13 +25,17 @@ const rightPanelTitleText = ref('查询结果 / 导入数据预览');
 // 控制右侧是显示表格还是占位符
 const isTableVisible = ref(false);
 
-// 用于存储未来从查询或导入获取的表格数据
-const tableData = ref<any[]>([]); // 类型可以更具体，比如 Record<string, any>[]
+// 明确 tableData 的类型，例如 Record<string, any>[] 或更具体的 TableRowData[]
+const tableData = ref<TableRowData[]>([]);
+const isLoading = ref(false); // 添加一个加载状态
 
 // --- Computed Properties ---
 
 // 根据当前状态计算占位符应显示的文本
 const placeholderContent = computed(() => {
+  if (isLoading.value) {
+    return '正在加载数据...';
+  }
   if (selectedQueryData.value) {
     return `已选择 "${selectedQueryData.value.name}"，请点击“执行查询”`;
   }
@@ -85,19 +92,50 @@ function handleExecuteQuery() {
 }
 
 // 处理点击“导入数据”按钮
-function handleImportData() {
+async function handleImportData() {
   selectedQueryData.value = null; // 清除查询选择
-  rightPanelTitleText.value = '导入数据预览 (模拟)';
-  console.log('触发导入数据流程...');
-  // TODO: 调用 Rust 后端打开文件选择对话框，读取 Excel 文件
-  // const importedData = await invoke('import_excel');
-  // tableData.value = importedData; // 更新表格数据
-  // 模拟显示表格和一些假数据
-   tableData.value = [
-    { colA: 'Excel数据1A', colB: 'Excel数据1B', colC: 'Excel数据1C' },
-    { colA: 'Excel数据2A', colB: 'Excel数据2B', colC: 'Excel数据2C' },
-  ]; // 实际应填充导入预览数据
-  isTableVisible.value = true;
+  rightPanelTitleText.value = '导入数据';
+  isTableVisible.value = false; // 清除旧表格
+  isLoading.value = true;
+
+  try {
+    // 2. 使用 Tauri dialog API 打开文件选择框
+    const selectedPath = await open({
+      multiple: false, // 只允许选一个文件
+      directory: false, // 不允许选文件夹
+      filters: [{ // 文件过滤器
+        name: 'Excel 工作簿',
+        extensions: ['xlsx', 'xls']
+      }]
+    });
+
+    if (typeof selectedPath === 'string') {
+      // 3. 如果用户选择了文件，调用 Rust 后端命令处理文件
+      rightPanelTitleText.value = '正在解析 Excel 文件...';
+      console.log('Selected file path:', selectedPath);
+
+      // 调用 Rust 命令 (假设叫 'import_excel_data') 并传递路径
+      const importedData = await invoke<TableRowData[]>('import_excel_data', {
+         filePath: selectedPath
+      });
+
+      // 6. 更新前端状态
+      tableData.value = importedData;
+      rightPanelTitleText.value = `导入数据预览: ${selectedPath.split(/[\\/]/).pop()}`; // 显示文件名
+      isTableVisible.value = true; // 显示表格
+
+    } else {
+      // 用户取消了选择
+      console.log('用户取消了文件选择');
+      rightPanelTitleText.value = '查询结果 / 导入数据预览'; // 恢复标题
+    }
+  } catch (error) {
+    console.error('导入或解析 Excel 文件失败:', error);
+    alert(`导入失败: ${error}`);
+    rightPanelTitleText.value = '导入错误'; // 显示错误状态
+  } finally {
+    isLoading.value = false;
+  }
 }
 
 // 处理点击“生成测试数据”按钮
@@ -112,33 +150,26 @@ function handleGenerateData() {
   // TODO: 调用 Rust 后端处理 tableData.value 来生成数据
 }
 
+
 </script>
 
 <template>
   <div class="flex flex-col h-screen p-4 space-y-4 bg-gray-100">
     <div class="flex-shrink-0 bg-white p-3 rounded-lg shadow space-x-2">
-      <button
-        @click="openAddModifyQueryModal"
-        class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300 transition duration-150 ease-in-out"
-      >
+      <button @click="openAddModifyQueryModal"
+        class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300 transition duration-150 ease-in-out">
         新增/修改查询
       </button>
-      <button
-        @click="handleExecuteQuery"
-        class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-300 transition duration-150 ease-in-out"
-      >
+      <button @click="handleExecuteQuery"
+        class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-300 transition duration-150 ease-in-out">
         执行查询
       </button>
-      <button
-        @click="handleImportData"
-        class="px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-300 transition duration-150 ease-in-out"
-      >
+      <button @click="handleImportData"
+        class="px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-300 transition duration-150 ease-in-out">
         导入数据(Excel)
       </button>
-      <button
-        @click="handleGenerateData"
-        class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-300 transition duration-150 ease-in-out"
-      >
+      <button @click="handleGenerateData"
+        class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-300 transition duration-150 ease-in-out">
         生成测试数据
       </button>
     </div>
@@ -147,10 +178,9 @@ function handleGenerateData() {
       <div class="w-1/4 flex-shrink-0 bg-white p-4 rounded-lg shadow flex flex-col">
         <h3 class="text-lg font-semibold mb-3 border-b pb-2 text-gray-700">查询列表</h3>
         <ul class="space-y-1 overflow-y-auto flex-grow">
-          <li
-            v-for="query in queryList"
-            :key="query.id" class="query-item p-2 rounded-md hover:bg-gray-100 cursor-pointer transition duration-150 ease-in-out"
-            :class="{ 'selected': selectedQueryData === query }" @click="handleQueryItemClick(query)" >
+          <li v-for="query in queryList" :key="query.id"
+            class="query-item p-2 rounded-md hover:bg-gray-100 cursor-pointer transition duration-150 ease-in-out"
+            :class="{ 'selected': selectedQueryData === query }" @click="handleQueryItemClick(query)">
             {{ query.name }}
           </li>
         </ul>
@@ -162,15 +192,21 @@ function handleGenerateData() {
           <div v-if="!isTableVisible" class="text-gray-500 text-center pt-10">
             {{ placeholderContent }}
           </div>
-          <table v-show="isTableVisible" class="min-w-full divide-y divide-gray-200">
+          <table v-show="isTableVisible && !isLoading" class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">诊断</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IHC</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">T</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">N</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">M</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  ID</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  诊断</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  IHC</th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">T
+                </th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">N
+                </th>
+                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">M
+                </th>
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
@@ -183,7 +219,7 @@ function handleGenerateData() {
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ row.m }}</td>
               </tr>
               <tr v-if="tableData.length === 0">
-                  <td colspan="6" class="px-6 py-4 text-center text-sm text-gray-500">没有数据</td>
+                <td colspan="6" class="px-6 py-4 text-center text-sm text-gray-500">没有数据</td>
               </tr>
             </tbody>
           </table>
@@ -191,11 +227,7 @@ function handleGenerateData() {
       </div>
     </div>
 
-    <AddQuery
-      v-if="isAddQueryVisible"
-      @close="handleModalClose"
-      @save="handleModalSave"
-    />
+    <AddQuery v-if="isAddQueryVisible" @close="handleModalClose" @save="handleModalSave" />
   </div>
 </template>
 
@@ -203,9 +235,11 @@ function handleGenerateData() {
 /* Style for selected list item */
 /* .query-item 类现在直接在 <li> 上， scoped 会生效 */
 .query-item.selected {
-    background-color: #e0f2fe; /* Light blue background for selected */
-    font-weight: 600;
+  background-color: #e0f2fe;
+  /* Light blue background for selected */
+  font-weight: 600;
 }
+
 /* 如果需要全局字体，应放在 main.css/style.css 中 */
 /* body { font-family: 'Inter', sans-serif; } */
 </style>
