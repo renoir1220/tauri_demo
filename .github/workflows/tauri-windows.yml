@@ -31,9 +31,17 @@ jobs:
         run: npm run tauri build
 
       - name: Upload Windows bundle as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v3.1.3
         with:
           name: tauri-windows
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
+
+      # 可选：自动发布到 GitHub Releases（需要配置 GH_TOKEN）
+      # - name: Create GitHub Release
+      #   uses: softprops/action-gh-release@v1
+      #   with:
+      #     files: |
+      #       src-tauri/target/release/bundle/msi/*.msi
+      #       src-tauri/target/release/bundle/nsis/*.exe
