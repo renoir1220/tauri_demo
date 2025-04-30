@@ -46,7 +46,7 @@ jobs:
           releaseBody: 'See the assets to download this version and install.'
           releaseDraft: true
           prerelease: false
-          args: --bundler none
+          args: --no-bundle
 
       - name: Upload green portable exe
         uses: actions/upload-artifact@v4
