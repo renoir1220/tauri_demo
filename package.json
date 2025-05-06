@@ -10,9 +10,12 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@ag-grid-community/client-side-row-model": "^32.3.5",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-dialog": "^2.2.1",
     "@tauri-apps/plugin-opener": "^2",
+    "ag-grid-community": "^33.2.4",
+    "ag-grid-vue3": "^33.2.4",
     "vue": "^3.5.13"
   },
   "devDependencies": {

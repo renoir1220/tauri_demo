@@ -1,14 +1,21 @@
 // src/App.vue
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 // 1. 导入子组件和类型
 import AddQuery from './components/AddQuery.vue';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, type OpenDialogOptions } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { AgGridVue } from "ag-grid-vue3"; // <--- 导入 AgGridVue 组件
+import type { ColDef, GridReadyEvent } from 'ag-grid-community'; // <--- (可选) 导入列定义类型以获得更好的类型提示
+import { ClientSideRowModelModule ,themeMaterial,ColumnAutoSizeModule} from 'ag-grid-community';
 
 import type { QuerySetData, TableRowData } from './types'; // 假设类型定义在 src/types.ts
 
+
 // --- Reactive State ---
+
+const agGridModules = [ClientSideRowModelModule,ColumnAutoSizeModule ];
+
 
 // 控制新增/修改模态框的显示
 const isAddQueryVisible = ref(false);
@@ -29,6 +36,10 @@ const isTableVisible = ref(false);
 const tableData = ref<TableRowData[]>([]);
 const isLoading = ref(false); // 添加一个加载状态
 
+// ---> 新增: AG Grid 的列定义状态 <---
+// 列定义需要是响应式的，因为列名是动态的
+const columnDefs = ref<ColDef[]>([]);
+
 // --- Computed Properties ---
 
 // 根据当前状态计算占位符应显示的文本
@@ -41,6 +52,32 @@ const placeholderContent = computed(() => {
   }
   return '请先执行查询或导入数据';
 });
+
+// --- Watchers ---
+
+// ---> 新增: 监视 tableData 的变化，动态生成列定义 <---
+watch(tableData, (newTableData) => {
+  if (newTableData && newTableData.length > 0) {
+    // 从第一行数据获取所有列名 (keys)
+    const headers = Object.keys(newTableData[0]);
+    console.log("table headers:", headers); // 调试输出列名
+    // 将列名映射为 AG Grid 的列定义对象 (ColDef)
+    columnDefs.value = headers.map(header => ({
+      field: header, // `field` 必须匹配 TableRowData 中的键 (列名)
+      headerName: header, // 表头显示名称，默认用字段名
+      sortable: true,     // 启用排序
+      filter: true,       // 启用筛选 (基础文本筛选)
+      resizable: true,    // 允许调整列宽
+      // 你可以添加更多配置，比如 width, valueGetter, cellRenderer 等
+    }));
+    console.log("Generated Column Definitions:", columnDefs.value);
+  } else {
+    // 如果没有数据，清空列定义
+    columnDefs.value = [];
+  }
+}, { deep: true }); // 使用 deep watch 可能不是最高效的，但对于数组内对象的变化是有效的，也可以只 watch 数组本身
+
+
 
 // --- Methods ---
 
@@ -93,49 +130,36 @@ function handleExecuteQuery() {
 
 // 处理点击“导入数据”按钮
 async function handleImportData() {
-  selectedQueryData.value = null; // 清除查询选择
+  selectedQueryData.value = null;
   rightPanelTitleText.value = '导入数据';
-  isTableVisible.value = false; // 清除旧表格
+  isTableVisible.value = false;
   isLoading.value = true;
+  tableData.value = []; // 清空旧数据
+  columnDefs.value = []; // 清空旧列定义
 
   try {
-    // 2. 使用 Tauri dialog API 打开文件选择框
     const selectedPath = await open({
-      multiple: false, // 只允许选一个文件
-      directory: false, // 不允许选文件夹
-      filters: [{ // 文件过滤器
-        name: 'Excel 工作簿',
+      multiple: false,
+      filters: [{
+        name: 'Excel',
         extensions: ['xlsx', 'xls']
       }]
-    });
-
-    if (typeof selectedPath === 'string') {
-      // 3. 如果用户选择了文件，调用 Rust 后端命令处理文件
+    } as OpenDialogOptions);
+    if (typeof selectedPath === 'string' || (Array.isArray(selectedPath) && selectedPath != "")) {
+      const filePath = Array.isArray(selectedPath) ? selectedPath[0] : selectedPath;
       rightPanelTitleText.value = '正在解析 Excel 文件...';
-      console.log('Selected file path:', selectedPath);
+      // 调用 Rust
+      const importedData = await invoke<TableRowData[]>('import_excel_data', { filePath });
 
-      // 调用 Rust 命令 (假设叫 'import_excel_data') 并传递路径
-      const importedData = await invoke<TableRowData[]>('import_excel_data', {
-         filePath: selectedPath
-      });
+      tableData.value = importedData; // 更新行数据 (触发 watch)
 
-      // 6. 更新前端状态
-      tableData.value = importedData;
-      rightPanelTitleText.value = `导入数据预览: ${selectedPath.split(/[\\/]/).pop()}`; // 显示文件名
-      isTableVisible.value = true; // 显示表格
+      await nextTick();
 
-    } else {
-      // 用户取消了选择
-      console.log('用户取消了文件选择');
-      rightPanelTitleText.value = '查询结果 / 导入数据预览'; // 恢复标题
-    }
-  } catch (error) {
-    console.error('导入或解析 Excel 文件失败:', error);
-    alert(`导入失败: ${error}`);
-    rightPanelTitleText.value = '导入错误'; // 显示错误状态
-  } finally {
-    isLoading.value = false;
-  }
+      rightPanelTitleText.value = `导入数据预览: ${filePath.split(/[\\/]/).pop()}`;
+      isTableVisible.value = true; // 准备显示表格
+    } else { /* ... user cancelled ... */ }
+  } catch (error) { /* ... error handling ... */ }
+  finally { isLoading.value = false; }
 }
 
 // 处理点击“生成测试数据”按钮
@@ -149,8 +173,6 @@ function handleGenerateData() {
   alert('在此处将弹出“映射管理”对话框 (原型中未实现)');
   // TODO: 调用 Rust 后端处理 tableData.value 来生成数据
 }
-
-
 </script>
 
 <template>
@@ -192,37 +214,13 @@ function handleGenerateData() {
           <div v-if="!isTableVisible" class="text-gray-500 text-center pt-10">
             {{ placeholderContent }}
           </div>
-          <table v-show="isTableVisible && !isLoading" class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-              <tr>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  ID</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  诊断</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  IHC</th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">T
-                </th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">N
-                </th>
-                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">M
-                </th>
-              </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-              <tr v-for="(row, index) in tableData" :key="index">
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ row.id || row.colA }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ row.diagnosis || row.colB }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ row.ihc || row.colC }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ row.t }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ row.n }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ row.m }}</td>
-              </tr>
-              <tr v-if="tableData.length === 0">
-                <td colspan="6" class="px-6 py-4 text-center text-sm text-gray-500">没有数据</td>
-              </tr>
-            </tbody>
-          </table>
+          <div v-show="isTableVisible && !isLoading" style="height: 100%; width: 100%;">
+            <AgGridVue style="height: 100%; width: 100%;" :rowData="tableData" :columnDefs="columnDefs"
+              :theme="themeMaterial" :pagination="true" :paginationPageSize="20"
+              :paginationPageSizeSelector="[10, 20, 50, 100]" :modules="agGridModules"
+              @grid-ready="(params: GridReadyEvent) => params.api.sizeColumnsToFit()">
+            </AgGridVue>
+          </div>
         </div>
       </div>
     </div>
